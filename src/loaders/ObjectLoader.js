@@ -42,13 +42,14 @@ import { RectAreaLight } from '../lights/RectAreaLight.js';
 import { OrthographicCamera } from '../cameras/OrthographicCamera.js';
 import { PerspectiveCamera } from '../cameras/PerspectiveCamera.js';
 import { Scene } from '../scenes/Scene.js';
+import { CubeTexture } from '../textures/CubeTexture.js';
 import { Texture } from '../textures/Texture.js';
 import { ImageLoader } from './ImageLoader.js';
 import { LoadingManager, DefaultLoadingManager } from './LoadingManager.js';
 import { AnimationClip } from '../animation/AnimationClip.js';
 import { MaterialLoader } from './MaterialLoader.js';
+import { LoaderUtils } from './LoaderUtils.js';
 import { BufferGeometryLoader } from './BufferGeometryLoader.js';
-import { JSONLoader } from './JSONLoader.js';
 import { FileLoader } from './FileLoader.js';
 import * as Geometries from '../geometries/Geometries.js';
 import * as Curves from '../extras/curves/Curves.js';
@@ -60,23 +61,23 @@ import * as Curves from '../extras/curves/Curves.js';
 function ObjectLoader( manager ) {
 
 	this.manager = ( manager !== undefined ) ? manager : DefaultLoadingManager;
-	this.texturePath = '';
+	this.resourcePath = '';
 
 }
 
 Object.assign( ObjectLoader.prototype, {
 
+	crossOrigin: 'anonymous',
+
 	load: function ( url, onLoad, onProgress, onError ) {
-
-		if ( this.texturePath === '' ) {
-
-			this.texturePath = url.substring( 0, url.lastIndexOf( '/' ) + 1 );
-
-		}
 
 		var scope = this;
 
+		var path = ( this.path === undefined ) ? LoaderUtils.extractUrlBase( url ) : this.path;
+		this.resourcePath = this.resourcePath || path;
+
 		var loader = new FileLoader( scope.manager );
+		loader.setPath( this.path );
 		loader.load( url, function ( text ) {
 
 			var json = null;
@@ -99,7 +100,7 @@ Object.assign( ObjectLoader.prototype, {
 
 			if ( metadata === undefined || metadata.type === undefined || metadata.type.toLowerCase() === 'geometry' ) {
 
-				console.error( 'THREE.ObjectLoader: Can\'t load ' + url + '. Use THREE.JSONLoader instead.' );
+				console.error( 'THREE.ObjectLoader: Can\'t load ' + url );
 				return;
 
 			}
@@ -110,9 +111,16 @@ Object.assign( ObjectLoader.prototype, {
 
 	},
 
-	setTexturePath: function ( value ) {
+	setPath: function ( value ) {
 
-		this.texturePath = value;
+		this.path = value;
+		return this;
+
+	},
+
+	setResourcePath: function ( value ) {
+
+		this.resourcePath = value;
 		return this;
 
 	},
@@ -182,7 +190,6 @@ Object.assign( ObjectLoader.prototype, {
 
 		if ( json !== undefined ) {
 
-			var geometryLoader = new JSONLoader();
 			var bufferGeometryLoader = new BufferGeometryLoader();
 
 			for ( var i = 0, l = json.length; i < l; i ++ ) {
@@ -415,7 +422,17 @@ Object.assign( ObjectLoader.prototype, {
 
 					case 'Geometry':
 
-						geometry = geometryLoader.parse( data, this.texturePath ).geometry;
+						if ( 'THREE' in window && 'LegacyJSONLoader' in THREE ) {
+
+							var geometryLoader = new THREE.LegacyJSONLoader();
+							geometry = geometryLoader.parse( data, this.resourcePath ).geometry;
+
+
+						} else {
+
+							console.error( 'THREE.ObjectLoader: You have to import LegacyJSONLoader in order load geometry data of type "Geometry".' );
+
+						}
 
 						break;
 
@@ -444,6 +461,7 @@ Object.assign( ObjectLoader.prototype, {
 
 	parseMaterials: function ( json, textures ) {
 
+		var cache = {}; // MultiMaterial
 		var materials = {};
 
 		if ( json !== undefined ) {
@@ -463,7 +481,15 @@ Object.assign( ObjectLoader.prototype, {
 
 					for ( var j = 0; j < data.materials.length; j ++ ) {
 
-						array.push( loader.parse( data.materials[ j ] ) );
+						var material = data.materials[ j ];
+
+						if ( cache[ material.uuid ] === undefined ) {
+
+							cache[ material.uuid ] = loader.parse( material );
+
+						}
+
+						array.push( cache[ material.uuid ] );
 
 					}
 
@@ -472,6 +498,7 @@ Object.assign( ObjectLoader.prototype, {
 				} else {
 
 					materials[ data.uuid ] = loader.parse( data );
+					cache[ data.uuid ] = materials[ data.uuid ];
 
 				}
 
@@ -518,8 +545,8 @@ Object.assign( ObjectLoader.prototype, {
 
 			}, undefined, function () {
 
-				scope.manager.itemEnd( url );
 				scope.manager.itemError( url );
+				scope.manager.itemEnd( url );
 
 			} );
 
@@ -532,12 +559,36 @@ Object.assign( ObjectLoader.prototype, {
 			var loader = new ImageLoader( manager );
 			loader.setCrossOrigin( this.crossOrigin );
 
-			for ( var i = 0, l = json.length; i < l; i ++ ) {
+			for ( var i = 0, il = json.length; i < il; i ++ ) {
 
 				var image = json[ i ];
-				var path = /^(\/\/)|([a-z]+:(\/\/)?)/i.test( image.url ) ? image.url : scope.texturePath + image.url;
+				var url = image.url;
 
-				images[ image.uuid ] = loadImage( path );
+				if ( Array.isArray( url ) ) {
+
+					// load array of images e.g CubeTexture
+
+					images[ image.uuid ] = [];
+
+					for ( var j = 0, jl = url.length; j < jl; j ++ ) {
+
+						var currentUrl = url[ j ];
+
+						var path = /^(\/\/)|([a-z]+:(\/\/)?)/i.test( currentUrl ) ? currentUrl : scope.resourcePath + currentUrl;
+
+						images[ image.uuid ].push( loadImage( path ) );
+
+					}
+
+				} else {
+
+					// load single image
+
+					var path = /^(\/\/)|([a-z]+:(\/\/)?)/i.test( image.url ) ? image.url : scope.resourcePath + image.url;
+
+					images[ image.uuid ] = loadImage( path );
+
+				}
 
 			}
 
@@ -579,7 +630,18 @@ Object.assign( ObjectLoader.prototype, {
 
 				}
 
-				var texture = new Texture( images[ data.image ] );
+				var texture;
+
+				if ( Array.isArray( images[ data.image ] ) ) {
+
+					texture = new CubeTexture( images[ data.image ] );
+
+				} else {
+
+					texture = new Texture( images[ data.image ] );
+
+				}
+
 				texture.needsUpdate = true;
 
 				texture.uuid = data.uuid;
@@ -601,12 +663,17 @@ Object.assign( ObjectLoader.prototype, {
 				}
 
 				if ( data.format !== undefined ) texture.format = data.format;
+				if ( data.type !== undefined ) texture.type = data.type;
+				if ( data.encoding !== undefined ) texture.encoding = data.encoding;
 
 				if ( data.minFilter !== undefined ) texture.minFilter = parseConstant( data.minFilter, TEXTURE_FILTER );
 				if ( data.magFilter !== undefined ) texture.magFilter = parseConstant( data.magFilter, TEXTURE_FILTER );
 				if ( data.anisotropy !== undefined ) texture.anisotropy = data.anisotropy;
 
 				if ( data.flipY !== undefined ) texture.flipY = data.flipY;
+
+				if ( data.premultiplyAlpha !== undefined ) texture.premultiplyAlpha = data.premultiplyAlpha;
+				if ( data.unpackAlignment !== undefined ) texture.unpackAlignment = data.unpackAlignment;
 
 				textures[ data.uuid ] = texture;
 

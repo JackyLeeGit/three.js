@@ -26,7 +26,7 @@ THREE.VRMLoader = ( function () {
 
 		constructor: VRMLoader,
 
-		crossOrigin: 'Anonymous',
+		crossOrigin: 'anonymous',
 
 		load: function ( url, onLoad, onProgress, onError ) {
 
@@ -50,6 +50,13 @@ THREE.VRMLoader = ( function () {
 		setPath: function ( value ) {
 
 			this.glTFLoader.setPath( value );
+			return this;
+
+		},
+
+		setResourcePath: function ( value ) {
+
+			this.glTFLoader.setResourcePath( value );
 			return this;
 
 		},

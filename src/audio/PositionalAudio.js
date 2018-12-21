@@ -36,6 +36,8 @@ PositionalAudio.prototype = Object.assign( Object.create( Audio.prototype ), {
 
 		this.panner.refDistance = value;
 
+		return this;
+
 	},
 
 	getRolloffFactor: function () {
@@ -47,6 +49,8 @@ PositionalAudio.prototype = Object.assign( Object.create( Audio.prototype ), {
 	setRolloffFactor: function ( value ) {
 
 		this.panner.rolloffFactor = value;
+
+		return this;
 
 	},
 
@@ -60,6 +64,8 @@ PositionalAudio.prototype = Object.assign( Object.create( Audio.prototype ), {
 
 		this.panner.distanceModel = value;
 
+		return this;
+
 	},
 
 	getMaxDistance: function () {
@@ -71,6 +77,18 @@ PositionalAudio.prototype = Object.assign( Object.create( Audio.prototype ), {
 	setMaxDistance: function ( value ) {
 
 		this.panner.maxDistance = value;
+
+		return this;
+
+	},
+
+	setDirectionalCone: function ( coneInnerAngle, coneOuterAngle, coneOuterGain ) {
+
+		this.panner.coneInnerAngle = coneInnerAngle;
+		this.panner.coneOuterAngle = coneOuterAngle;
+		this.panner.coneOuterGain = coneOuterGain;
+
+		return this;
 
 	},
 
@@ -86,13 +104,33 @@ PositionalAudio.prototype = Object.assign( Object.create( Audio.prototype ), {
 
 			Object3D.prototype.updateMatrixWorld.call( this, force );
 
-			var panner = this.panner;
+			if ( this.isPlaying === false ) return;
+
 			this.matrixWorld.decompose( position, quaternion, scale );
 
 			orientation.set( 0, 0, 1 ).applyQuaternion( quaternion );
 
-			panner.setPosition( position.x, position.y, position.z );
-			panner.setOrientation( orientation.x, orientation.y, orientation.z );
+			var panner = this.panner;
+
+			if ( panner.positionX ) {
+
+				// code path for Chrome and Firefox (see #14393)
+
+				var endTime = this.context.currentTime + this.listener.timeDelta;
+
+				panner.positionX.linearRampToValueAtTime( position.x, endTime );
+				panner.positionY.linearRampToValueAtTime( position.y, endTime );
+				panner.positionZ.linearRampToValueAtTime( position.z, endTime );
+				panner.orientationX.linearRampToValueAtTime( orientation.x, endTime );
+				panner.orientationY.linearRampToValueAtTime( orientation.y, endTime );
+				panner.orientationZ.linearRampToValueAtTime( orientation.z, endTime );
+
+			} else {
+
+				panner.setPosition( position.x, position.y, position.z );
+				panner.setOrientation( orientation.x, orientation.y, orientation.z );
+
+			}
 
 		};
 
